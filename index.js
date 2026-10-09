@@ -1,11 +1,28 @@
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
-const qrcode = require('qrcode-terminal');
+const qrcode = require('qrcode');
 const pino = require('pino');
 const http = require('http');
 
-const server = http.createServer((req, res) => {
-    res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('Z-Aura WhatsApp Bot ipo hewani!\n');
+const server = http.createServer(async (req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    if (latestQR) {
+        try {
+            const urlImage = await qrcode.toDataURL(latestQR);
+            res.end(`
+                <html>
+                    <body style="text-align:center; font-family:sans-serif; margin-top:50px;">
+                        <h2>Changanua QR Code hii kuunganisha Z-Aura Bot</h2>
+                        <img src="${urlImage}" alt="WhatsApp QR Code" style="width:300px; height:300px;"/>
+                        <p>Ikiwa haijafanya kazi, fanya refresh ukurasa huu.</p>
+                    </body>
+                </html>
+            `);
+        } catch (err) {
+            res.end('Imeshindikana kutengeneza QR Code.');
+        }
+    } else {
+        res.end('<h3>Z-Aura WhatsApp Bot ipo hewani na tayari imeunganishwa au inasubiri maelekezo!</h3>');
+    }
 });
 
 const PORT = process.env.PORT || 3000;
@@ -24,23 +41,28 @@ async function startBot() {
         printQRInTerminal: false
     });
 
-    sock.ev.on('connection.update', (update) => {
-        const { connection, lastDisconnect, qr } = update;
-        
-        
+    let latestQR = '';
 
-        if (connection === 'close') {
-            const reason = lastDisconnect?.error?.output?.statusCode;
-            console.log('Muunganisho umekatika. Sababu:', reason);
-            if (reason !== DisconnectReason.loggedOut) {
-                startBot();
-            } else {
-                console.log('Akaunti imetolewa. Futa auth_info_baileys na uanze upya.');
-            }
-        } else if (connection === 'open') {
-            console.log('✅ Bot imeunganishwa mafanikio kwenye WhatsApp!');
+sock.ev.on('connection.update', async (update) => {
+    const { connection, lastDisconnect, qr } = update;
+
+    if (qr) {
+        latestQR = qr;
+    }
+
+    if (connection === 'close') {
+        const reason = lastDisconnect?.error?.output?.statusCode;
+        console.log('Muunganisho umekatika. Sababu:', reason);
+        if (reason !== DisconnectReason.loggedOut) {
+            startBot();
+        } else {
+            console.log('Akaunti imetolewa. Futa auth_info_baileys na uanze upya.');
         }
-    });
+    } else if (connection === 'open') {
+        latestQR = '';
+        console.log('✅ Bot imeunganishwa mafanikio kwenye WhatsApp!');
+    }
+});
 
     sock.ev.on('creds.update', saveCreds);
 
