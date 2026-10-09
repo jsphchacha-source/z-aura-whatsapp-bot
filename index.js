@@ -27,10 +27,7 @@ async function startBot() {
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect, qr } = update;
         
-        if (qr) {
-            console.log('\nTafadhali changanua QR Code hii kwenye Terminal au Logs:\n');
-            qrcode.generate(qr, { small: true });
-        }
+        
 
         if (connection === 'close') {
             const reason = lastDisconnect?.error?.output?.statusCode;
