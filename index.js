@@ -3,6 +3,7 @@ const qrcode = require('qrcode');
 const pino = require('pino');
 const http = require('http');
 
+let latestQR = ''; // Weka hapa ili iwe inasomeka pande zote
 const server = http.createServer(async (req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/html' });
     if (latestQR) {
