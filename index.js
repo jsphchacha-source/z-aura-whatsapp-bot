@@ -3,7 +3,8 @@ const qrcode = require('qrcode');
 const pino = require('pino');
 const http = require('http');
 
-let latestQR = ''; // Weka hapa ili iwe inasomeka pande zote
+let latestQR = ''; // Kigezo cha kimataifa cha kuhifadhi QR code ya sasa
+
 const server = http.createServer(async (req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/html' });
     if (latestQR) {
@@ -22,7 +23,7 @@ const server = http.createServer(async (req, res) => {
             res.end('Imeshindikana kutengeneza QR Code.');
         }
     } else {
-        res.end('<h3>Z-Aura WhatsApp Bot ipo hewani na tayari imeunganishwa au inasubiri maelekezo!</h3>');
+        res.end('<h3>Z-Aura WhatsApp Bot ipo hewani na tayari imeunganishwa au inasubiri QR code mpya... Fanya refresh!</h3>');
     }
 });
 
@@ -42,28 +43,26 @@ async function startBot() {
         printQRInTerminal: false
     });
 
-    let latestQR = '';
+    sock.ev.on('connection.update', async (update) => {
+        const { connection, lastDisconnect, qr } = update;
 
-sock.ev.on('connection.update', async (update) => {
-    const { connection, lastDisconnect, qr } = update;
-
-    if (qr) {
-        latestQR = qr;
-    }
-
-    if (connection === 'close') {
-        const reason = lastDisconnect?.error?.output?.statusCode;
-        console.log('Muunganisho umekatika. Sababu:', reason);
-        if (reason !== DisconnectReason.loggedOut) {
-            startBot();
-        } else {
-            console.log('Akaunti imetolewa. Futa auth_info_baileys na uanze upya.');
+        if (qr) {
+            latestQR = qr; // Inasasisha QR code ya kimataifa ili ionekane kwenye browser
         }
-    } else if (connection === 'open') {
-        latestQR = '';
-        console.log('✅ Bot imeunganishwa mafanikio kwenye WhatsApp!');
-    }
-});
+
+        if (connection === 'close') {
+            const reason = lastDisconnect?.error?.output?.statusCode;
+            console.log('Muunganisho umekatika. Sababu:', reason);
+            if (reason !== DisconnectReason.loggedOut) {
+                startBot();
+            } else {
+                console.log('Akaunti imetolewa. Futa auth_info_baileys na uanze upya.');
+            }
+        } else if (connection === 'open') {
+            latestQR = ''; // Ikishaunganishwa, tunafuta QR code
+            console.log('✅ Bot imeunganishwa mafanikio kwenye WhatsApp!');
+        }
+    });
 
     sock.ev.on('creds.update', saveCreds);
 
@@ -114,7 +113,7 @@ sock.ev.on('connection.update', async (update) => {
                 text: `🎉 Hongera sana ${customerName}!\n\nOda yako ya **${orderedItem}** imepokelewa kikamilifu.\n📍 Eneo lako: ${customerLocation}\n\nUsimamizi wa Z-Aura Home & Fragrance utawasiliana nawe hivi punde kwa ajili ya malipo na kuletewa mzigo wako. Asante sana! 🙏\n\nTuma namba **0** kurudi kwenye menyu kuu.` 
             });
 
-            console.log(`\n📦 ODA MPYA IMETHIBITISHWA!\n- Jina: ${customerName}\n- Bidhaa: ${orderedItem}\n- Eneo: ${customerLocation}\n- Namba ya WhatsApp: ${senderID}\n`);
+            console.log(`\n📦 ODA MPYA IMETHIBITISHWA!\nJina: ${customerName}\nBidhaa: ${orderedItem}\nEneo: ${customerLocation}\nNamba ya WhatsApp: ${senderID}\n`);
             
             delete userState[senderID];
             return;
@@ -140,74 +139,74 @@ sock.ev.on('connection.update', async (update) => {
         // Vifurushi vya Laundry (11 - 14)
         else if (lowerText === '11') {
             userState[senderID] = { item: 'Z-AURA LAUNDRY STARTER', step: 'awaiting_name' };
-            await sock.sendMessage(senderID, { text: "✅ **Z-AURA LAUNDRY STARTER (Basic) **\n\n- Wilko Laundry Gel Fresh Cotton 1L\n- Fairy Original Fabric Conditioner \n- Dr. Beckmann 3-in-1 Colour & Dirt Collector Sheets\n- M Pre-Wash Stain Remover\n\n Ili kuweka oda ya kifurushi hiki, tafadhali andika **jina lako kamili**:" });
+            await sock.sendMessage(senderID, { text: "✅ **Z-AURA LAUNDRY STARTER (Basic)**\n\nWilko Laundry Gel Fresh Cotton 1L\nFairy Original Fabric Conditioner\nDr. Beckmann 3-in-1 Colour & Dirt Collector Sheets\nM Pre-Wash Stain Remover\n\nIli kuweka oda ya kifurushi hiki, tafadhali andika **jina lako kamili**:" });
         }
         else if (lowerText === '12') {
             userState[senderID] = { item: 'Z-AURA FRESH LAUNDRY COMBO (Standard)', step: 'awaiting_name' };
-            await sock.sendMessage(senderID, { text: "✅ **Z-AURA FRESH LAUNDRY COMBO (Standard)**\n\n- Lenor Fabric Conditioner Spring Awakening\n- Fairy Original Fabric Conditioner\n- Lenor Crease Releaser Exotic Bloom\n- Febreze Fabric Freshener Lenor Exotic Bloom 500ml\n- Gel Beads\n- Mr Sheen Oxi Ultra 400g\n\nIli kuweka oda ya kifurushi hiki, tafadhali andika **jina lako kamili**:" });
+            await sock.sendMessage(senderID, { text: "✅ **Z-AURA FRESH LAUNDRY COMBO (Standard)**\n\nLenor Fabric Conditioner Spring Awakening\nFairy Original Fabric Conditioner\nLenor Crease Releaser Exotic Bloom\nFebreze Fabric Freshener Lenor Exotic Bloom 500ml\nGel Beads\nMr Sheen Oxi Ultra 400g\n\nIli kuweka oda ya kifurushi hiki, tafadhali andika **jina lako kamili**:" });
         }
         else if (lowerText === '13') {
             userState[senderID] = { item: 'Z-AURA PREMIUM LAUNDRY COLLECTION', step: 'awaiting_name' };
-            await sock.sendMessage(senderID, { text: "✅ **Z-AURA PREMIUM LAUNDRY COLLECTION**\n\n- Wilko Laundry Gel Fresh Cotton\n- Lenor Outdoorable Fabric Conditioner\n- Lenor Fabric Conditioner Spring Awakening\n- Lenor Crease Releaser\n- Dr. Beckmann Colour & Dirt Collector\n- M Pre-Wash Stain Remover\n- Gel Beads\n\nIli kuweka oda ya kifurushi hiki, tafadhali andika **jina lako kamili**:" });
+            await sock.sendMessage(senderID, { text: "✅ **Z-AURA PREMIUM LAUNDRY COLLECTION**\n\nWilko Laundry Gel Fresh Cotton\nLenor Outdoorable Fabric Conditioner\nLenor Fabric Conditioner Spring Awakening\nLenor Crease Releaser\nDr. Beckmann Colour & Dirt Collector\nM Pre-Wash Stain Remover\nGel Beads\n\nIli kuweka oda ya kifurushi hiki, tafadhali andika **jina lako kamili**:" });
         }
         else if (lowerText === '14') {
             userState[senderID] = { item: 'Z-AURA FAMILY LAUNDRY PACK', step: 'awaiting_name' };
-            await sock.sendMessage(senderID, { text: "✅ **Z-AURA FAMILY LAUNDRY PACK**\n\n- Genesis Vibrant Detergent 750ml\n- Sta-Soft Spring Fresh 2L\n- Sta-Soft Aromatherapy Passion 2L\n- Dr. Beckmann Colour Collector\n- M Pre-Wash Stain Remover\n- Home Butler Laundry Bag\n\nIli kuweka oda ya kifurushi hiki, tafadhali andika **jina lako kamili**:" });
+            await sock.sendMessage(senderID, { text: "✅ **Z-AURA FAMILY LAUNDRY PACK**\n\nGenesis Vibrant Detergent 750ml\nSta-Soft Spring Fresh 2L\nSta-Soft Aromatherapy Passion 2L\nDr. Beckmann Colour Collector\nM Pre-Wash Stain Remover\nHome Butler Laundry Bag\n\nIli kuweka oda ya kifurushi hiki, tafadhali andika **jina lako kamili**:" });
         }
 
         // Vifurushi vya Baby (21)
         else if (lowerText === '21') {
             userState[senderID] = { item: 'Z-AURA BABY CLOTHES CARE PACK', step: 'awaiting_name' };
-            await sock.sendMessage(senderID, { text: "✅ **Z-AURA BABY CLOTHES CARE PACK**\n\n- Elizabeth Anne Baby Liquid Laundry Wash\n- Sta-Soft Ultra Concentrate Sensitive 1L\n- Dr. Beckmann Colour & Dirt Collector Sheets\n- Home Butler Laundry Bag\n\nIli kuweka oda ya kifurushi hiki, tafadhali andika **jina lako kamili**:" });
+            await sock.sendMessage(senderID, { text: "✅ **Z-AURA BABY CLOTHES CARE PACK**\n\nElizabeth Anne Baby Liquid Laundry Wash\nSta-Soft Ultra Concentrate Sensitive 1L\nDr. Beckmann Colour & Dirt Collector Sheets\nHome Butler Laundry Bag\n\nIli kuweka oda ya kifurushi hiki, tafadhali andika **jina lako kamili**:" });
         }
 
         // Vifurushi vya Home Cleaning (31 - 34)
         else if (lowerText === '31') {
             userState[senderID] = { item: 'Z-AURA KITCHEN POWER COMBO', step: 'awaiting_name' };
-            await sock.sendMessage(senderID, { text: "✅ **Z-AURA KITCHEN POWER COMBO**\n\n- Astonish Air Fryer Cleaner Degreaser\n- Astonish Kitchen Cleaner Zesty Lemon\n- Astonish Specialist Grease Lift\n- Elbow Grease Soda Crystals\n- Elbow Grease Bicarbonate Soda\n- Elbow Grease Gloves\n\nIli kuweka oda ya kifurushi hiki, tafadhali andika **jina lako kamili**:" });
+            await sock.sendMessage(senderID, { text: "✅ **Z-AURA KITCHEN POWER COMBO**\n\nAstonish Air Fryer Cleaner Degreaser\nAstonish Kitchen Cleaner Zesty Lemon\nAstonish Specialist Grease Lift\nElbow Grease Soda Crystals\nElbow Grease Bicarbonate Soda\nElbow Grease Gloves\n\nIli kuweka oda ya kifurushi hiki, tafadhali andika **jina lako kamili**:" });
         }
         else if (lowerText === '32') {
-            userState[senderID] = { item: 'Z-AURA BATHROOM & TOILET POWER PACK(Hygiene Pack)', step: 'awaiting_name' };
-            await sock.sendMessage(senderID, { text: "✅ **Z-AURA BATHROOM & TOILET POWER PACK**\n\n- Astonish White Jasmine & Basil Bathroom Cleaner\n- Astonish Daily Shower Shine\n- Harpic Original 750ml & Power Plus Original\n- Harpic Lavender Toilet Cleaner\n- Domestos Lavender Blast Thick Bleach & 50g Toilet Cleaner\n- Toilet Block 50g & Harpic Rimblock\n- Duzzit Window Squeegee & Dish Brush Round\n- Elbow Grease Gloves (Large)\n\nIli kuweka oda ya kifurushi hiki, tafadhali andika **jina lako kamili**:" });
+            userState[senderID] = { item: 'Z-AURA BATHROOM & TOILET POWER PACK (Hygiene Pack)', step: 'awaiting_name' };
+            await sock.sendMessage(senderID, { text: "✅ **Z-AURA BATHROOM & TOILET POWER PACK**\n\nAstonish White Jasmine & Basil Bathroom Cleaner\nAstonish Daily Shower Shine\nHarpic Original 750ml & Power Plus Original\nHarpic Lavender Toilet Cleaner\nDomestos Lavender Blast Thick Bleach & 50g Toilet Cleaner\nToilet Block 50g & Harpic Rimblock\nDuzzit Window Squeegee & Dish Brush Round\nElbow Grease Gloves (Large)\n\nIli kuweka oda ya kifurushi hiki, tafadhali andika **jina lako kamili**:" });
         }
         else if (lowerText === '33') {
-            userState[senderID] = { item: 'Z-AURA DEEP CLEAN HOME COMBO(All-In-One)', step: 'awaiting_name' };
-            await sock.sendMessage(senderID, { text: "✅ **Z-AURA DEEP CLEAN HOME COMBO**\n\n- Astonish Multi-Surface Cleaner Orange Grove\n- Astonish Specialist Antibacterial Surface Cleanser\n- Mr Muscle Floor & All-Purpose Cleaner\n- Mr Sheen Daily Surface 1L\n- Domestos Thick Bleach Summer Fresh\n- Super Brite Floor & Tile Cleaner Lavender\n- Astonish Multipurpose Cleaner Bleach\n- Mr Muscle Shower Shine Cleaner & Superbrite 500ml\n- Jeyes Homeguard Bleach Citrus\n- M Thick Bleach Lavender Bloom\n- Cobra Multi Surface Cleaner Lavender\n\nIli kuweka oda ya kifurushi hiki, tafadhali andika **jina lako kamili**:" });
+            userState[senderID] = { item: 'Z-AURA DEEP CLEAN HOME COMBO (All-In-One)', step: 'awaiting_name' };
+            await sock.sendMessage(senderID, { text: "✅ **Z-AURA DEEP CLEAN HOME COMBO**\n\nAstonish Multi-Surface Cleaner Orange Grove\nAstonish Specialist Antibacterial Surface Cleanser\nMr Muscle Floor & All-Purpose Cleaner\nMr Sheen Daily Surface 1L\nDomestos Thick Bleach Summer Fresh\nSuper Brite Floor & Tile Cleaner Lavender\nAstonish Multipurpose Cleaner Bleach\nMr Muscle Shower Shine Cleaner & Superbrite 500ml\nJeyes Homeguard Bleach Citrus\nM Thick Bleach Lavender Bloom\nCobra Multi Surface Cleaner Lavender\n\nIli kuweka oda ya kifurushi hiki, tafadhali andika **jina lako kamili**:" });
         }
         else if (lowerText === '34') {
-            userState[senderID] = { item: 'Z-AURA APPLIANCE CARE PACK(Protection-And-Shine)', step: 'awaiting_name' };
-            await sock.sendMessage(senderID, { text: "✅ **Z-AURA APPLIANCE CARE PACK**\n Kwa ajili ya kutunza vifaa vyako vya nyumbani.Husaidia kuondoa scale na mabaki ya chokaa, kusafisha washing machine, na kung'arisha stainless steel kwa mwonekano safi na wa kuvutia.)\n- Elbow Grease Kettle Descaler & Descaler\n- Duzzit Washing Machine Cleaner Lemon\n- Astonish Stainless Steel Cleaner\n\nIli kuweka oda ya kifurushi hiki, tafadhali andika **jina lako kamili**:" });
+            userState[senderID] = { item: 'Z-AURA APPLIANCE CARE PACK (Protection-And-Shine)', step: 'awaiting_name' };
+            await sock.sendMessage(senderID, { text: "✅ **Z-AURA APPLIANCE CARE PACK**\n\nKwa ajili ya kutunza vifaa vyako vya nyumbani. Husaidia kuondoa scale na mabaki ya chokaa, kusafisha washing machine, na kung'arisha stainless steel kwa mwonekano safi na wa kuvutia.\n\nElbow Grease Kettle Descaler\nDuzzit Washing Machine Cleaner Lemon\nAstonish Stainless Steel Cleaner\n\nIli kuweka oda ya kifurushi hiki, tafadhali andika **jina lako kamili**:" });
         }
 
         // Vifurushi vya Air Fragrance (41 - 43)
         else if (lowerText === '41') {
-            userState[senderID] = { item: 'Z-AURA HOME FRESH STARTER(Basic)', step: 'awaiting_name' };
-            await sock.sendMessage(senderID, { text: "✅ **Z-AURA HOME FRESH STARTER**\n\n- Airwick\n- Mystify Lavender Gel Air Freshener\n- Mystify Citrus Fruit Gel Air Freshener\n- Shield Fresh 24 Lavender\n\nIli kuweka oda ya kifurushi hiki, tafadhali andika **jina lako kamili**:" });
+            userState[senderID] = { item: 'Z-AURA HOME FRESH STARTER (Basic)', step: 'awaiting_name' };
+            await sock.sendMessage(senderID, { text: "✅ **Z-AURA HOME FRESH STARTER**\n\nAirwick\nMystify Lavender Gel Air Freshener\nMystify Citrus Fruit Gel Air Freshener\nShield Fresh 24 Lavender\n\nIli kuweka oda ya kifurushi hiki, tafadhali andika **jina lako kamili**:" });
         }
         else if (lowerText === '42') {
             userState[senderID] = { item: 'Z-AURA PREMIUM HOME FRAGRANCE', step: 'awaiting_name' };
-            await sock.sendMessage(senderID, { text: "✅ **Z-AURA PREMIUM HOME FRAGRANCE**\n\n- Febreze Air Freshener Peony & Cedar 185ml\n- RS Fleur Home perfume\n- RS Oud Forest\n- RS Vanilla Bean\n- Febreze Fabric Freshener Lenor Exotic Bloom\n- Febreze Fabric Refresher Enchanted Wildflowers & Alpine Escape\n- Febreze Fabric Plum Cherry\n- Mystify Gel Air Freshener & Shield Fresh 24 Tropical\n- Airwick 250ml & Hanging Dehumidifier\n\nIli kuweka oda ya kifurushi hiki, tafadhali andika **jina lako kamili**:" });
+            await sock.sendMessage(senderID, { text: "✅ **Z-AURA PREMIUM HOME FRAGRANCE**\n\nFebreze Air Freshener Peony & Cedar 185ml\nRS Fleur Home perfume\nRS Oud Forest\nRS Vanilla Bean\nFebreze Fabric Freshener Lenor Exotic Bloom\nFebreze Fabric Refresher Enchanted Wildflowers & Alpine Escape\nFebreze Fabric Plum Cherry\nMystify Gel Air Freshener & Shield Fresh 24 Tropical\nAirwick 250ml & Hanging Dehumidifier\n\nIli kuweka oda ya kifurushi hiki, tafadhali andika **jina lako kamili**:" });
         }
         else if (lowerText === '43') {
             userState[senderID] = { item: 'Z-AURA BIN & SPACE FRESH PACK', step: 'awaiting_name' };
-            await sock.sendMessage(senderID, { text: "✅ **Z-AURA BIN & SPACE FRESH PACK**\n\n- Bin Brite Citronella Lemon\n- Bin Brite Mediterranean Sun\n- Bin Brite Berry Blast\n- Bin Brite Spring Blossom\n- Small Space Dehumidifier\n\nIli kuweka oda ya kifurushi hiki, tafadhali andika **jina lako kamili**:" });
+            await sock.sendMessage(senderID, { text: "✅ **Z-AURA BIN & SPACE FRESH PACK**\n\nBin Brite Citronella Lemon\nBin Brite Mediterranean Sun\nBin Brite Berry Blast\nBin Brite Spring Blossom\nSmall Space Dehumidifier\n\nIli kuweka oda ya kifurushi hiki, tafadhali andika **jina lako kamili**:" });
         }
 
         // Vifurushi vya Car Care (51 - 53)
         else if (lowerText === '51') {
-            userState[senderID] = { item: 'Z-AURA CAR FRESH STARTER(Basic)', step: 'awaiting_name' };
-            await sock.sendMessage(senderID, { text: "✅ **Z-AURA CAR FRESH STARTER**\n\n- RS Fleur\n- RS Vanilla Bean\n- Car Fragrance Spicy Leather\n- Shield Fresh\n\nIli kuweka oda ya kifurushi hiki, tafadhali andika **jina lako kamili**:" });
+            userState[senderID] = { item: 'Z-AURA CAR FRESH STARTER (Basic)', step: 'awaiting_name' };
+            await sock.sendMessage(senderID, { text: "✅ **Z-AURA CAR FRESH STARTER**\n\nRS Fleur\nRS Vanilla Bean\nCar Fragrance Spicy Leather\nShield Fresh\n\nIli kuweka oda ya kifurushi hiki, tafadhali andika **jina lako kamili**:" });
         }
         else if (lowerText === '52') {
             userState[senderID] = { item: 'Z-AURA CAR INTERIOR CARE', step: 'awaiting_name' };
-            await sock.sendMessage(senderID, { text: "✅ **Z-AURA CAR INTERIOR CARE**\n\n- Shield Cockpit Dashboard Protector\n- Shield Leather Care 400ml\n- Shield Sheen Silicone\n- Shield Splash N Dash Sponge\n\nIli kuweka oda ya kifurushi hiki, tafadhali andika **jina lako kamili**:" });
+            await sock.sendMessage(senderID, { text: "✅ **Z-AURA CAR INTERIOR CARE**\n\nShield Cockpit Dashboard Protector\nShield Leather Care 400ml\nShield Sheen Silicone\nShield Splash N Dash Sponge\n\nIli kuweka oda ya kifurushi hiki, tafadhali andika **jina lako kamili**:" });
         }
         else if (lowerText === '53') {
             userState[senderID] = { item: 'Z-AURA PREMIUM CAR CLEAN AND FRESH', step: 'awaiting_name' };
-            await sock.sendMessage(senderID, { text: "✅ **Z-AURA PREMIUM CAR CLEAN AND FRESH**\n\n- Optimo Auto Washing Liquid\n- Shield Cockpit Dashboard Protector & Leather Care\n- Shield Sheen Silicone & Splash N Dash Sponge\n- RS Leather Secret & Car Fragrance Spicy Leather\n- RS Fleur, Oud Forest & Vanilla Bean\n\nIli kuweka oda ya kifurushi hiki, tafadhali andika **jina lako kamili**:" });
+            await sock.sendMessage(senderID, { text: "✅ **Z-AURA PREMIUM CAR CLEAN AND FRESH**\n\nOptimo Auto Washing Liquid\nShield Cockpit Dashboard Protector & Leather Care\nShield Sheen Silicone & Splash N Dash Sponge\nRS Leather Secret & Car Fragrance Spicy Leather\nRS Fleur, Oud Forest & Vanilla Bean\n\nIli kuweka oda ya kifurushi hiki, tafadhali andika **jina lako kamili**:" });
         }
         else {
-            await sock.sendMessage(senderID, { text: "Samahani,Tuma namba **0** au neno **menu** kuona orodha kuu." });
+            await sock.sendMessage(senderID, { text: "Samahani, tuma namba **0** au neno **menu** kuona orodha kuu." });
         }
     });
 }
