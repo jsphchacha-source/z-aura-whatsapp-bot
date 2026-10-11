@@ -620,10 +620,10 @@ async function startBot() {
     const { state, saveCreds } =
       await useMultiFileAuthState(AUTH_FOLDER);
 
+   
     const sock = makeWASocket({
       auth: state,
       logger: pino({ level: 'silent' }),
-      printQRInTerminal: false,
       markOnlineOnConnect: false,
       syncFullHistory: false,
       connectTimeoutMs: 60000,
@@ -640,9 +640,14 @@ async function startBot() {
 
       if (qr) {
         latestQR = qr;
+
         console.log(
           'QR mpya imetengenezwa. Fungua ukurasa wa QR uliolindwa na token.',
         );
+      }
+
+      if (connection === 'connecting') {
+        console.log('Z-Aura Bot inaunganisha na WhatsApp...');
       }
 
       if (connection === 'open') {
@@ -659,26 +664,31 @@ async function startBot() {
 
         console.log('WhatsApp imekatika. Sababu:', reason);
 
+        if (shuttingDown) {
+          isStarting = false;
+          return;
+        }
+
         if (reason === DisconnectReason.loggedOut) {
           console.error(
-            'Akaunti imetolewa kwenye WhatsApp. Futa auth_info_baileys kwa makusudi tu, kisha anzisha upya ili kuunganisha kwa QR mpya.',
+            'Session ya WhatsApp imekataliwa. Unganisha kifaa upya kwa QR.',
           );
 
           isStarting = false;
           return;
         }
 
-        if (!reconnectTimer && !shuttingDown) {
+        if (!reconnectTimer) {
           reconnectTimer = setTimeout(() => {
             reconnectTimer = null;
             isStarting = false;
 
-            startBot().catch((error) =>
+            startBot().catch((error) => {
               console.error(
                 'Hitilafu ya kuunganisha tena:',
                 error,
-              ),
-            );
+              );
+            });
           }, 5000);
         }
       }
@@ -720,18 +730,19 @@ async function startBot() {
     );
   } catch (error) {
     console.error('Imeshindikana kuanzisha bot:', error);
+
     isStarting = false;
 
     if (!reconnectTimer && !shuttingDown) {
       reconnectTimer = setTimeout(() => {
         reconnectTimer = null;
 
-        startBot().catch((err) =>
+        startBot().catch((err) => {
           console.error(
             'Hitilafu ya kuanzisha tena:',
             err,
-          ),
-        );
+          );
+        });
       }, 5000);
     }
   }
@@ -748,7 +759,10 @@ async function shutdown(signal) {
   }
 
   try {
-    if (botSocket) botSocket.end(undefined);
+    if (botSocket) {
+      botSocket.end(undefined);
+      botSocket = null;
+    }
 
     await mongoose.disconnect();
   } catch (error) {
@@ -758,9 +772,19 @@ async function shutdown(signal) {
     );
   }
 
-  server.close(() => process.exit(0));
+  server.close((error) => {
+    if (error) {
+      console.error('Hitilafu ya kufunga seva:', error.message);
+      process.exitCode = 1;
+    }
 
-  setTimeout(() => process.exit(1), 5000).unref();
+    process.exit();
+  });
+
+  setTimeout(() => {
+    console.error('Muda wa kuzima mfumo umeisha.');
+    process.exit(1);
+  }, 5000).unref();
 }
 
 async function main() {
@@ -791,5 +815,6 @@ process.on('SIGTERM', () => shutdown('SIGTERM'));
 
 main().catch((error) => {
   console.error('Mfumo haujaanza:', error.message);
-  process.exit(1);
+  process.exitCode = 1;
 });
+
