@@ -1,820 +1,244 @@
-
-require('dotenv').config();
-
-const path = require('path');
-const http = require('http');
-const mongoose = require('mongoose');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode');
 const pino = require('pino');
+const http = require('http');
 
-const {
-  default: makeWASocket,
-  useMultiFileAuthState,
-  DisconnectReason,
-} = require('@whiskeysockets/baileys');
+let latestQR = ''; // Kigezo cha kimataifa cha kuhifadhi QR code ya sasa
 
-const PORT = Number(process.env.PORT || 3000);
-const AUTH_FOLDER = path.join(__dirname, 'auth_info_baileys');
-const QR_TOKEN = process.env.QR_TOKEN;
-const MONGODB_URI = process.env.MONGODB_URI;
-
-let latestQR = '';
-let botSocket = null;
-let isStarting = false;
-let reconnectTimer = null;
-let shuttingDown = false;
-
-const conversationSchema = new mongoose.Schema({
-  whatsappId: { type: String, unique: true, required: true },
-  itemCode: String,
-  item: String,
-  step: String,
-  name: String,
-  location: String,
-  phone: String,
-  updatedAt: { type: Date, default: Date.now },
-});
-
-const orderSchema = new mongoose.Schema({
-  whatsappId: { type: String, required: true, index: true },
-  customerName: { type: String, required: true },
-  customerLocation: { type: String, required: true },
-  customerPhone: { type: String, required: true },
-  itemCode: { type: String, required: true },
-  item: { type: String, required: true },
-  status: { type: String, default: 'pending' },
-  createdAt: { type: Date, default: Date.now },
-});
-
-const Conversation =
-  mongoose.models.Conversation ||
-  mongoose.model('Conversation', conversationSchema);
-
-const Order =
-  mongoose.models.Order ||
-  mongoose.model('Order', orderSchema);
-
-const products = {
-  '11': {
-    category: '1',
-    name: 'Z-AURA LAUNDRY STARTER',
-    details: [
-      'Wilko Laundry Gel Fresh Cotton 1L',
-      'Fairy Original Fabric Conditioner',
-      'Dr. Beckmann 3-in-1 Colour & Dirt Collector Sheets',
-      'M Pre-Wash Stain Remover',
-    ],
-  },
-  '12': {
-    category: '1',
-    name: 'Z-AURA FRESH LAUNDRY COMBO (Standard)',
-    details: [
-      'Lenor Fabric Conditioner Spring Awakening',
-      'Fairy Original Fabric Conditioner',
-      'Lenor Crease Releaser Exotic Bloom',
-      'Febreze Fabric Freshener Lenor Exotic Bloom 500ml',
-      'Gel Beads',
-      'Mr Sheen Oxi Ultra 400g',
-    ],
-  },
-  '13': {
-    category: '1',
-    name: 'Z-AURA PREMIUM LAUNDRY COLLECTION',
-    details: [
-      'Wilko Laundry Gel Fresh Cotton',
-      'Lenor Outdoorable Fabric Conditioner',
-      'Lenor Fabric Conditioner Spring Awakening',
-      'Lenor Crease Releaser',
-      'Dr. Beckmann Colour & Dirt Collector',
-      'M Pre-Wash Stain Remover',
-      'Gel Beads',
-    ],
-  },
-  '14': {
-    category: '1',
-    name: 'Z-AURA FAMILY LAUNDRY PACK',
-    details: [
-      'Genesis Vibrant Detergent 750ml',
-      'Sta-Soft Spring Fresh 2L',
-      'Sta-Soft Aromatherapy Passion 2L',
-      'Dr. Beckmann Colour Collector',
-      'M Pre-Wash Stain Remover',
-      'Home Butler Laundry Bag',
-    ],
-  },
-  '21': {
-    category: '2',
-    name: 'Z-AURA BABY CLOTHES CARE PACK',
-    details: [
-      'Elizabeth Anne Baby Liquid Laundry Wash',
-      'Sta-Soft Ultra Concentrate Sensitive 1L',
-      'Dr. Beckmann Colour & Dirt Collector Sheets',
-      'Home Butler Laundry Bag',
-    ],
-  },
-  '31': {
-    category: '3',
-    name: 'Z-AURA KITCHEN POWER COMBO',
-    details: [
-      'Astonish Air Fryer Cleaner Degreaser',
-      'Astonish Kitchen Cleaner Zesty Lemon',
-      'Astonish Specialist Grease Lift',
-      'Elbow Grease Soda Crystals',
-      'Elbow Grease Bicarbonate Soda',
-      'Elbow Grease Gloves',
-    ],
-  },
-  '32': {
-    category: '3',
-    name: 'Z-AURA BATHROOM & TOILET POWER PACK',
-    details: [
-      'Astonish White Jasmine & Basil Bathroom Cleaner',
-      'Astonish Daily Shower Shine',
-      'Harpic Original 750ml & Power Plus Original',
-      'Harpic Lavender Toilet Cleaner',
-      'Domestos Lavender Blast Thick Bleach & 50g Toilet Cleaner',
-      'Toilet Block 50g & Harpic Rimblock',
-      'Duzzit Window Squeegee & Dish Brush Round',
-      'Elbow Grease Gloves (Large)',
-    ],
-  },
-  '33': {
-    category: '3',
-    name: 'Z-AURA DEEP CLEAN HOME COMBO',
-    details: [
-      'Astonish Multi-Surface Cleaner Orange Grove',
-      'Astonish Specialist Antibacterial Surface Cleanser',
-      'Mr Muscle Floor & All-Purpose Cleaner',
-      'Mr Sheen Daily Surface 1L',
-      'Domestos Thick Bleach Summer Fresh',
-      'Super Brite Floor & Tile Cleaner Lavender',
-      'Astonish Multipurpose Cleaner Bleach',
-      'Mr Muscle Shower Shine Cleaner & Superbrite 500ml',
-      'Jeyes Homeguard Bleach Citrus',
-      'M Thick Bleach Lavender Bloom',
-      'Cobra Multi Surface Cleaner Lavender',
-    ],
-  },
-  '34': {
-    category: '3',
-    name: 'Z-AURA APPLIANCE CARE PACK (Protection & Shine)',
-    details: [
-      'Elbow Grease Kettle Descaler',
-      'Elbow Grease Descaler 3×25ml',
-      'Duzzit Washing Machine Cleaner Lemon',
-      'Duzzit Washing Machine Cleaner',
-      'Astonish Stainless Steel Cleaner',
-    ],
-  },
-  '41': {
-    category: '4',
-    name: 'Z-AURA HOME FRESH STARTER',
-    details: [
-      'Airwick',
-      'Mystify Lavender Gel Air Freshener',
-      'Mystify Citrus Fruit Gel Air Freshener',
-      'Shield Fresh 24 Lavender',
-    ],
-  },
-  '42': {
-    category: '4',
-    name: 'Z-AURA PREMIUM HOME FRAGRANCE',
-    details: [
-      'Febreze Air Freshener Peony & Cedar 185ml',
-      'RS Fleur Home perfume',
-      'RS Oud Forest',
-      'RS Vanilla Bean',
-      'Febreze Fabric Freshener Lenor Exotic Bloom',
-      'Febreze Fabric Refresher Enchanted Wildflowers & Alpine Escape',
-      'Febreze Fabric Plum Cherry',
-      'Mystify Gel Air Freshener & Shield Fresh 24 Tropical',
-      'Airwick 250ml & Hanging Dehumidifier',
-    ],
-  },
-  '43': {
-    category: '4',
-    name: 'Z-AURA BIN & SPACE FRESH PACK',
-    details: [
-      'Bin Brite Citronella Lemon',
-      'Bin Brite Mediterranean Sun',
-      'Bin Brite Berry Blast',
-      'Bin Brite Spring Blossom',
-      'Small Space Dehumidifier',
-    ],
-  },
-  '51': {
-    category: '5',
-    name: 'Z-AURA CAR FRESH STARTER',
-    details: [
-      'RS Fleur',
-      'RS Vanilla Bean',
-      'Car Fragrance Spicy Leather',
-      'Shield Fresh',
-    ],
-  },
-  '52': {
-    category: '5',
-    name: 'Z-AURA CAR INTERIOR CARE',
-    details: [
-      'Shield Cockpit Dashboard Protector',
-      'Shield Leather Care 400ml',
-      'Shield Sheen Silicone',
-      'Shield Splash N Dash Sponge',
-    ],
-  },
-  '53': {
-    category: '5',
-    name: 'Z-AURA PREMIUM CAR CLEAN AND FRESH',
-    details: [
-      'Optimo Auto Washing Liquid',
-      'Shield Cockpit Dashboard Protector & Leather Care',
-      'Shield Sheen Silicone & Splash N Dash Sponge',
-      'RS Leather Secret & Car Fragrance Spicy Leather',
-      'RS Fleur, Oud Forest & Vanilla Bean',
-    ],
-  },
-};
-
-const categoryMenus = {
-  '1': {
-    title: '🧺 LAUNDRY CARE COMBOS',
-    description:
-      'Husaidia kupata nguo safi, laini na zenye harufu nzuri. Pia husaidia kutunza nguo na kushughulikia madoa kulingana na bidhaa iliyotumika.',
-    codes: ['11', '12', '13', '14'],
-  },
-  '2': {
-    title: '👶 BABY CARE COMBOS',
-    description:
-      'Vifurushi vya usafi wa nguo za watoto. Tafadhali fuata maelekezo ya bidhaa na chagua bidhaa inayofaa mahitaji ya mtoto wako.',
-    codes: ['21'],
-  },
-  '3': {
-    title: '🧼 HOME CLEANING COMBOS',
-    description:
-      'Vifurushi vya kusafisha jikoni, bafuni, chooni, sakafuni na baadhi ya vifaa vya nyumbani. Tumia kila bidhaa kulingana na lebo yake.',
-    codes: ['31', '32', '33', '34'],
-  },
-  '4': {
-    title: '🌸 AIR FRAGRANCE COMBOS',
-    description:
-      'Bidhaa za kuboresha harufu ya nyumbani na kusaidia kupunguza harufu zisizopendeza.',
-    codes: ['41', '42', '43'],
-  },
-  '5': {
-    title: '🚗 CAR CARE COMBOS',
-    description:
-      'Bidhaa za kusafisha na kutunza sehemu za ndani za gari, pamoja na bidhaa za kuongeza harufu nzuri.',
-    codes: ['51', '52', '53'],
-  },
-};
-
-function mainMenu() {
-  return [
-    'Habari, karibu Z-Aura Home & Fragrance 👋',
-    '',
-    'Chagua aina ya combo kwa kutuma namba husika.',
-    '',
-    'Tuma 0 wakati wowote kurudi kwenye menyu kuu.',
-    '',
-    '1️⃣ 🧺 LAUNDRY CARE COMBOS',
-    '2️⃣ 👶 BABY CARE COMBOS',
-    '3️⃣ 🧼 HOME CLEANING COMBOS',
-    '4️⃣ 🌸 AIR FRAGRANCE COMBOS',
-    '5️⃣ 🚗 CAR CARE COMBOS',
-  ].join('\n');
-}
-
-function categoryMessage(categoryCode) {
-  const category = categoryMenus[categoryCode];
-
-  if (!category) return mainMenu();
-
-  const comboList = category.codes
-    .map((code) => `${code}. ${products[code].name}`)
-    .join('\n');
-
-  return `${category.title}
-
-${category.description}
-
-Tuma namba ya combo unayotaka kuagiza:
-
-${comboList}
-
-Tuma 0 kurudi kwenye menyu kuu.`;
-}
-
-function productMessage(code) {
-  const product = products[code];
-
-  return `✅ ${product.name}
-
-${product.details.map((item) => `• ${item}`).join('\n')}
-
-Ili kuendelea na oda, andika jina lako kamili.
-
-Tuma 0 kughairi na kurudi kwenye menyu kuu.`;
-}
-
-function getMessageText(message) {
-  if (!message) return '';
-
-  return (
-    message.conversation ||
-    message.extendedTextMessage?.text ||
-    message.imageMessage?.caption ||
-    message.videoMessage?.caption ||
-    message.documentMessage?.caption ||
-    message.buttonsResponseMessage?.selectedButtonId ||
-    message.listResponseMessage?.singleSelectReply?.selectedRowId ||
-    ''
-  ).trim();
-}
-
-async function getState(senderID) {
-  return Conversation.findOne({ whatsappId: senderID }).lean();
-}
-
-async function saveState(senderID, state) {
-  await Conversation.updateOne(
-    { whatsappId: senderID },
-    {
-      $set: {
-        whatsappId: senderID,
-        ...state,
-        updatedAt: new Date(),
-      },
-    },
-    { upsert: true },
-  );
-}
-
-async function clearState(senderID) {
-  await Conversation.deleteOne({ whatsappId: senderID });
-}
-
-async function sendText(sock, senderID, text) {
-  await sock.sendMessage(senderID, { text });
-}
-
-async function processMessage(sock, message) {
-  if (!message?.message || message.key?.fromMe) return;
-
-  const senderID = message.key?.remoteJid;
-
-  if (
-    !senderID ||
-    senderID === 'status@broadcast' ||
-    senderID.endsWith('@g.us')
-  ) {
-    return;
-  }
-
-  const text = getMessageText(message.message);
-
-  if (!text) return;
-
-  const lowerText = text.toLowerCase();
-
-  const menuWords = [
-    '0',
-    'menu',
-    'hi',
-    'mambo',
-    'habari',
-    'kwema',
-    'hello',
-    'start',
-  ];
-
-  if (menuWords.includes(lowerText)) {
-    await clearState(senderID);
-    await sendText(sock, senderID, mainMenu());
-    return;
-  }
-
-  const state = await getState(senderID);
-
-  // Hatua ya kwanza: kupokea jina la mteja
-  if (state?.step === 'awaiting_name') {
-    if (text.length < 3 || /^\d+$/.test(text)) {
-      await sendText(
-        sock,
-        senderID,
-        'Tafadhali andika jina lako kamili.',
-      );
-      return;
-    }
-
-    await saveState(senderID, {
-      itemCode: state.itemCode,
-      item: state.item,
-      step: 'awaiting_location',
-      name: text,
-    });
-
-    await sendText(
-      sock,
-      senderID,
-      `Asante ${text}.
-
-Sasa andika eneo lako, mfano: Mikocheni, Dar es Salaam.`,
-    );
-    return;
-  }
-
-  // Hatua ya pili: kupokea eneo la mteja
-  if (state?.step === 'awaiting_location') {
-    if (text.length < 2 || /^\d+$/.test(text)) {
-      await sendText(
-        sock,
-        senderID,
-        'Tafadhali andika eneo lako (address), mfano: Mikocheni, Dar es Salaam.',
-      );
-      return;
-    }
-
-    await saveState(senderID, {
-      itemCode: state.itemCode,
-      item: state.item,
-      step: 'awaiting_phone',
-      name: state.name,
-      location: text,
-    });
-
-    await sendText(
-      sock,
-      senderID,
-      'Asante. Sasa tuma namba ya simu utakayotumia kupokea mzigo, mfano: 07XXXXXXXX au +2557XXXXXXXX.',
-    );
-    return;
-  }
-
-  // Hatua ya tatu: kupokea namba ya simu na kuhifadhi oda
-  if (state?.step === 'awaiting_phone') {
-    const phone = text.replace(/[\s()-]/g, '');
-
-    if (!/^\+?\d{10,12}$/.test(phone)) {
-      await sendText(
-        sock,
-        senderID,
-        'Namba haijaonekana kuwa sahihi. Tuma namba yenye tarakimu 10 hadi 12, kwa mfano +2557XXXXXXXX.',
-      );
-      return;
-    }
-
-    try {
-      const order = await Order.create({
-        whatsappId: senderID,
-        customerName: state.name,
-        customerLocation: state.location,
-        customerPhone: phone,
-        itemCode: state.itemCode,
-        item: state.item,
-      });
-
-      await clearState(senderID);
-
-      await sendText(
-        sock,
-        senderID,
-        `Asante ${order.customerName}.
-
-Ombi lako la oda limepokelewa.
-
-Combo: ${order.item}
-Eneo: ${order.customerLocation}
-Simu ya kupokea mzigo: ${order.customerPhone}
-Namba ya oda: ${order._id}
-
-Team ya Z-Aura Home & Fragrance itawasiliana nawe kuthibitisha upatikanaji, bei, malipo na usafirishaji.
-
-Tuma 0 kurudi kwenye menyu kuu.`,
-      );
-
-      console.log(
-        `ODA MPYA: ${order._id} | ${order.item} | ${order.customerName} | ${order.customerPhone}`,
-      );
-    } catch (error) {
-      console.error('Imeshindikana kuhifadhi oda:', error);
-
-      await sendText(
-        sock,
-        senderID,
-        'Samahani, oda haijahifadhiwa kwa sababu ya hitilafu ya mfumo. Taarifa zako bado hazijatumwa kama oda. Tafadhali jaribu tena baada ya muda au tuma 0 kuanza upya.',
-      );
-    }
-
-    return;
-  }
-
-  // Mteja akichagua kundi la bidhaa
-  if (categoryMenus[lowerText]) {
-    await sendText(sock, senderID, categoryMessage(lowerText));
-    return;
-  }
-
-  // Mteja akichagua combo maalumu
-  if (products[lowerText]) {
-    const product = products[lowerText];
-
-    await saveState(senderID, {
-      itemCode: lowerText,
-      item: product.name,
-      step: 'awaiting_name',
-    });
-
-    await sendText(sock, senderID, productMessage(lowerText));
-    return;
-  }
-
-  // Jibu la mteja lisipotambulika
-  await sendText(
-    sock,
-    senderID,
-    `Samahani, sijaelewa chaguo lako.
-
-${mainMenu()}
-
-Ukiwa tayari kuchagua combo, tuma namba yake kama 11, 21, 31 au 53.`,
-  );
-}
-
- // Ukurasa wa QR unalindwa na token. Weka QR_TOKEN kwenye .env.
 const server = http.createServer(async (req, res) => {
-  const requestUrl = new URL(
-    req.url,
-    `http://${req.headers.host || 'localhost'}`,
-  );
-
-  if (requestUrl.pathname !== '/') {
-    res.writeHead(404, {
-      'Content-Type': 'text/plain; charset=utf-8',
-    });
-    res.end('Ukurasa haujapatikana.');
-    return;
-  }
-
-  if (
-    !QR_TOKEN ||
-    requestUrl.searchParams.get('token') !== QR_TOKEN
-  ) {
-    res.writeHead(403, {
-      'Content-Type': 'text/plain; charset=utf-8',
-    });
-    res.end('Ufikiaji umekataliwa.');
-    return;
-  }
-
-  res.writeHead(200, {
-    'Content-Type': 'text/html; charset=utf-8',
-    'Cache-Control': 'no-store, no-cache, must-revalidate',
-    Pragma: 'no-cache',
-  });
-
-  if (!latestQR) {
-    res.end(`<!doctype html>
-<html lang="sw">
-<head>
-<meta charset="utf-8">
-<title>Z-Aura Bot</title>
-</head>
-<body style="font-family:Arial;text-align:center;margin:40px">
-<h2>Z-Aura WhatsApp Bot</h2>
-<p>QR haipo kwa sasa. Huenda bot imeunganishwa tayari.</p>
-<p>Refresh ukurasa baada ya muda mfupi.</p>
-</body>
-</html>`);
-    return;
-  }
-
-  try {
-    const image = await qrcode.toDataURL(latestQR);
-
-    res.end(`<!doctype html>
-<html lang="sw">
-<head>
-<meta charset="utf-8">
-<title>Z-Aura QR</title>
-</head>
-<body style="font-family:Arial;text-align:center;margin:40px">
-<h2>Unganisha Z-Aura WhatsApp Bot</h2>
-<p>WhatsApp, Linked Devices, Link a Device. Changanua QR hii.</p>
-<img src="${image}" alt="WhatsApp QR"
-style="width:300px;max-width:90%;height:auto">
-<p>QR ikikataa, refresh ukurasa ili kupata QR mpya.</p>
-</body>
-</html>`);
-  } catch (error) {
-    console.error('Hitilafu ya QR:', error.message);
-    res.end('Imeshindikana kutengeneza QR Code.');
-  }
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    if (latestQR) {
+        try {
+            const urlImage = await qrcode.toDataURL(latestQR);
+            res.end(`
+                <html>
+                    <body style="text-align:center; font-family:sans-serif; margin-top:50px;">
+                        <h2>Changanua QR Code hii kuunganisha Z-Aura Bot</h2>
+                        <img src="${urlImage}" alt="WhatsApp QR Code" style="width:300px; height:300px;"/>
+                        <p>Ikiwa haijafanya kazi, fanya refresh ukurasa huu.</p>
+                    </body>
+                </html>
+            `);
+        } catch (err) {
+            res.end('Imeshindikana kutengeneza QR Code.');
+        }
+    } else {
+        res.end('<h3>Z-Aura WhatsApp Bot ipo hewani na tayari imeunganishwa au inasubiri QR code mpya... Fanya refresh!</h3>');
+    }
 });
+
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+    console.log(`Seva inasikiliza kwenye port ${PORT}`);
+});
+
+const userState = {};
 
 async function startBot() {
-  if (isStarting || shuttingDown) return;
+    const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
 
-  isStarting = true;
-
-  try {
-    const { state, saveCreds } =
-      await useMultiFileAuthState(AUTH_FOLDER);
-
-   
     const sock = makeWASocket({
-      auth: state,
-      logger: pino({ level: 'silent' }),
-      markOnlineOnConnect: false,
-      syncFullHistory: false,
-      connectTimeoutMs: 60000,
-      defaultQueryTimeoutMs: 60000,
-      keepAliveIntervalMs: 25000,
+       logger: pino({ level: 'debug' }), auth: state,
+        printQRInTerminal: false
     });
 
-    botSocket = sock;
+    sock.ev.on('connection.update', async (update) => {
+        const { connection, lastDisconnect, qr } = update;
+
+        if (qr) {
+            latestQR = qr; // Inasasisha QR code ya kimataifa ili ionekane kwenye browser
+        }
+
+        if (connection === 'close') {
+            const reason = lastDisconnect?.error?.output?.statusCode;
+            console.log('Muunganisho umekatika. Sababu:', reason);
+            if (reason !== DisconnectReason.loggedOut) {
+                startBot();
+            } else {
+                console.log('Akaunti imetolewa. Futa auth_info_baileys na uanze upya.');
+            }
+        } else if (connection === 'open') {
+            latestQR = ''; // Ikishaunganishwa, tunafuta QR code
+            console.log('✅ Bot imeunganishwa mafanikio kwenye WhatsApp!');
+        }
+    });
+
+sock.ev.on('connection.update', async (update) => {
+    const { connection, lastDisconnect, qr } = update;
+
+    if (qr) {
+        latestQR = qr;
+        console.log('📲 QR mpya imepatikana. Fungua ukurasa wa bot uichanganue.');
+    }
+
+    if (connection === 'connecting') {
+        console.log('⏳ Bot inajaribu kuunganisha WhatsApp...');
+    }
+
+    if (connection === 'close') {
+        latestQR = '';
+
+        const reason = lastDisconnect?.error?.output?.statusCode;
+        console.log('Muunganisho umekatika. Sababu:', reason);
+
+        if (reason === DisconnectReason.loggedOut) {
+            console.log('Akaunti imetolewa. Unganisha tena kwa utaratibu salama.');
+        } else {
+            console.log('Muunganisho umekatika. Sitajaribu kuanzisha socket nyingine moja kwa moja hapa.');
+        }
+    }
+
+    if (connection === 'open') {
+        latestQR = '';
+        console.log('✅ Bot imeunganishwa mafanikio kwenye WhatsApp!');
+    }
+});
 
     sock.ev.on('creds.update', saveCreds);
 
-    sock.ev.on('connection.update', (update) => {
-      const { connection, lastDisconnect, qr } = update;
+    sock.ev.on('messages.upsert', async ({ messages }) => {
+        const m = messages[0];
+        if (!m.message || m.key.fromMe) return;
 
-      if (qr) {
-        latestQR = qr;
+        const senderID = m.key.remoteJid;
+        const messageText = m.message.conversation || m.message.extendedTextMessage?.text;
+        if (!messageText) return;
 
-        console.log(
-          'QR mpya imetengenezwa. Fungua ukurasa wa QR uliolindwa na token.',
-        );
-      }
+        const text = messageText.trim();
+        const lowerText = text.toLowerCase();
 
-      if (connection === 'connecting') {
-        console.log('Z-Aura Bot inaunganisha na WhatsApp...');
-      }
-
-      if (connection === 'open') {
-        latestQR = '';
-        console.log('Z-Aura Bot imeunganishwa na WhatsApp.');
-      }
-
-      if (connection === 'close') {
-        latestQR = '';
-        botSocket = null;
-
-        const reason =
-          lastDisconnect?.error?.output?.statusCode;
-
-        console.log('WhatsApp imekatika. Sababu:', reason);
-
-        if (shuttingDown) {
-          isStarting = false;
-          return;
+        // Kanuni ya 1: Mteja akituma 0, menu, hi, au hello - safisha state na umpe menyu kuu
+        if (lowerText === '0' || lowerText === 'menu' || lowerText === 'hi' || lowerText === 'mambo' || lowerText === 'habari' || lowerText === 'kwema' || lowerText === 'hello') {
+            delete userState[senderID];
+            const menuText = `Habari, karibu Z-Aura Home & Fragrance 👋\n\nTafadhali chagua aina ya (Combo) unayohitaji kwa kutuma namba husika 🔢\n\nTuma namba **0** wakati wowote kurudi kwenye menyu kuu.\n\n1️⃣ 🧺 LAUNDRY CARE COMBOS\n2️⃣ 👶 BABY CARE COMBOS\n3️⃣ 🧼 HOME CLEANING COMBOS\n4️⃣ 🌸 AIR FRAGRANCE COMBOS\n5️⃣ 🚗 CAR CARE COMBOS`;
+            await sock.sendMessage(senderID, { text: menuText });
+            return;
         }
 
-        if (reason === DisconnectReason.loggedOut) {
-          console.error(
-            'Session ya WhatsApp imekataliwa. Unganisha kifaa upya kwa QR.',
-          );
-
-          isStarting = false;
-          return;
-        }
-
-        if (!reconnectTimer) {
-          reconnectTimer = setTimeout(() => {
-            reconnectTimer = null;
-            isStarting = false;
-
-            startBot().catch((error) => {
-              console.error(
-                'Hitilafu ya kuunganisha tena:',
-                error,
-              );
-            });
-          }, 5000);
-        }
-      }
-    });
-
-    sock.ev.on(
-      'messages.upsert',
-      async ({ messages, type }) => {
-        if (type !== 'notify') return;
-
-        for (const message of messages || []) {
-          try {
-            await processMessage(sock, message);
-          } catch (error) {
-            console.error(
-              'Hitilafu ya kushughulikia ujumbe:',
-              error,
-            );
-
-            const senderID = message?.key?.remoteJid;
-
-            if (senderID && !message.key?.fromMe) {
-              try {
-                await sendText(
-                  sock,
-                  senderID,
-                  'Samahani, hitilafu imetokea. Tafadhali tuma 0 kuanza tena.',
-                );
-              } catch (sendError) {
-                console.error(
-                  'Imeshindikana kutuma ujumbe wa hitilafu:',
-                  sendError.message,
-                );
-              }
+        // Hatua ya kusubiri Jina la Mteja na Uhakiki wake
+        if (userState[senderID] && userState[senderID].step === 'awaiting_name') {
+            if (!isNaN(text) || text.length < 3) {
+                await sock.sendMessage(senderID, { text: "⚠️ Samahani, tafadhali andika **jina lako kamili** (sio namba au herufi fupi):" });
+                return;
             }
-          }
+
+            userState[senderID].name = text;
+            userState[senderID].step = 'awaiting_location';
+            await sock.sendMessage(senderID, { text: `Asante **${text}**! Sasa tafadhali andika **eneo lako unaloishi** na namba ya simu ya kupokelea mzigo (Mfano: Kinondoni, Dar es Salaam):` });
+            return;
         }
-      },
-    );
-  } catch (error) {
-    console.error('Imeshindikana kuanzisha bot:', error);
 
-    isStarting = false;
+        // Hatua ya kusubiri Eneo na Uhakiki wake
+        if (userState[senderID] && userState[senderID].step === 'awaiting_location') {
+            if (!isNaN(text) || text.length < 2) {
+                await sock.sendMessage(senderID, { text: "⚠️ Tafadhali andika jina la eneo lako unaloishi vizuri (Mfano: Mikocheni, Dar es Salaam):" });
+                return;
+            }
 
-    if (!reconnectTimer && !shuttingDown) {
-      reconnectTimer = setTimeout(() => {
-        reconnectTimer = null;
+            const customerLocation = text;
+            const orderedItem = userState[senderID].item;
+            const customerName = userState[senderID].name;
 
-        startBot().catch((err) => {
-          console.error(
-            'Hitilafu ya kuanzisha tena:',
-            err,
-          );
-        });
-      }, 5000);
-    }
-  }
+            await sock.sendMessage(senderID, {
+                text: `🎉 Hongera sana ${customerName}!\n\nOda yako ya **${orderedItem}** imepokelewa kikamilifu.\n📍 Eneo lako: ${customerLocation}\n\nUsimamizi wa Z-Aura Home & Fragrance utawasiliana nawe hivi punde kwa ajili ya malipo na kuletewa mzigo wako. Asante sana! 🙏\n\nTuma namba **0** kurudi kwenye menyu kuu.`
+            });
+
+            console.log(`\n📦 ODA MPYA IMETHIBITISHWA!\nJina: ${customerName}\nBidhaa: ${orderedItem}\nEneo: ${customerLocation}\nNamba ya WhatsApp: ${senderID}\n`);
+
+            delete userState[senderID];
+            return;
+        }
+
+        // Menyu Kuu ya Makundi
+        if (lowerText === '1') {
+            await sock.sendMessage(senderID, { text: `🧺 **LAUNDRY CARE COMBOS**\nHusaidia kupata nguo safi, laini na zenye harufu nzuri kwa muda mrefu. Huondoa madoa na harufu zisizopendeza, na kuacha nguo zikiwa fresh na tayari kuvaliwa.\nTuma namba ya combo unayotaka kuagiza:\n\n11. Z-AURA LAUNDRY STARTER\n12. Z-AURA FRESH LAUNDRY COMBO\n13. Z-AURA PREMIUM LAUNDRY COLLECTION\n14. Z-AURA FAMILY LAUNDRY PACK\n\nTuma **0** kurudi kwenye menyu kuu.` });
+        }
+        else if (lowerText === '2') {
+            await sock.sendMessage(senderID, { text: `👶 **BABY CARE COMBOS**\nImeandaliwa maalum kwa ajili ya nguo za watoto, kusaidia kuziweka safi, laini na zenye harufu mwanana. Hufaa kwa matumizi ya kila siku na husaidia kutunza upole wa nguo zinazogusa ngozi ya mtoto.\nTuma namba ya combo unayotaka kuagiza:\n\n21. Z-AURA BABY CLOTHES CARE PACK\n\nTuma **0** kurudi kwenye menyu kuu.` });
+        }
+        else if (lowerText === '3') {
+            await sock.sendMessage(senderID, { text: `🧼 **HOME CLEANING COMBOS**\nKifurushi kamili cha usafi wa nyumbani kinachokusaidia kuokoa muda, kuacha kila sehemu ikiwa safi na kung'aa, huku kikiongeza harufu nzuri na freshness ya kudumu.\nTuma namba ya combo unayotaka kuagiza:\n\n31. Z-AURA KITCHEN POWER COMBO\n32. Z-AURA BATHROOM & TOILET POWER PACK\n33. Z-AURA DEEP CLEAN HOME COMBO\n34. Z-AURA APPLIANCE CARE PACK\n\nTuma **0** kurudi kwenye menyu kuu.` });
+        }
+        else if (lowerText === '4') {
+            await sock.sendMessage(senderID, { text: `🌸 **AIR FRAGRANCE COMBOS**\nHuondoa harufu zisizopendeza za sebleni, jikoni,bafuni,chooni, unyevunyevu na moshi, na kuacha nyumba ikiwa safi, fresh na yenye harufu nzuri kwa muda wote.\nTuma namba ya combo unayotaka kuagiza:\n41. Z-AURA HOME FRESH STARTER\n42. Z-AURA PREMIUM HOME FRAGRANCE\n43. Z-AURA BIN & SPACE FRESH PACK\n\nTuma **0** kurudi kwenye menyu kuu.` });
+        }
+        else if (lowerText === '5') {
+            await sock.sendMessage(senderID, { text: `🚗 **CAR CARE COMBOS**\nSafisha na linda interior ya gari lako kwa urahisi. Husaidia kusafisha dashibodi na viti vya ngozi, huku ikisaidia kuvihifadhi katika hali nzuri na kuacha harufu ya kifahari na ya kuvutia.\nTuma namba ya combo unayotaka kuagiza:\n51. Z-AURA CAR FRESH STARTER\n52. Z-AURA CAR INTERIOR CARE\n53. Z-AURA PREMIUM CAR CLEAN AND FRESH\n\nTuma **0** kurudi kwenye menyu kuu.` });
+        }
+
+        // Vifurushi vya Laundry (11 - 14)
+        else if (lowerText === '11') {
+            userState[senderID] = { item: 'Z-AURA LAUNDRY STARTER', step: 'awaiting_name' };
+            await sock.sendMessage(senderID, { text: "✅ **Z-AURA LAUNDRY STARTER (Basic)**\n\nWilko Laundry Gel Fresh Cotton 1L\nFairy Original Fabric Conditioner\nDr. Beckmann 3-in-1 Colour & Dirt Collector Sheets\nM Pre-Wash Stain Remover\n\nIli kuweka oda ya kifurushi hiki, tafadhali andika **jina lako kamili**:" });
+        }
+        else if (lowerText === '12') {
+            userState[senderID] = { item: 'Z-AURA FRESH LAUNDRY COMBO (Standard)', step: 'awaiting_name' };
+            await sock.sendMessage(senderID, { text: "✅ **Z-AURA FRESH LAUNDRY COMBO (Standard)**\n\nLenor Fabric Conditioner Spring Awakening\nFairy Original Fabric Conditioner\nLenor Crease Releaser Exotic Bloom\nFebreze Fabric Freshener Lenor Exotic Bloom 500ml\nGel Beads\nMr Sheen Oxi Ultra 400g\n\nIli kuweka oda ya kifurushi hiki, tafadhali andika **jina lako kamili**:" });
+        }
+        else if (lowerText === '13') {
+            userState[senderID] = { item: 'Z-AURA PREMIUM LAUNDRY COLLECTION', step: 'awaiting_name' };
+            await sock.sendMessage(senderID, { text: "✅ **Z-AURA PREMIUM LAUNDRY COLLECTION**\n\nWilko Laundry Gel Fresh Cotton\nLenor Outdoorable Fabric Conditioner\nLenor Fabric Conditioner Spring Awakening\nLenor Crease Releaser\nDr. Beckmann Colour & Dirt Collector\nM Pre-Wash Stain Remover\nGel Beads\n\nIli kuweka oda ya kifurushi hiki, tafadhali andika **jina lako kamili**:" });
+        }
+        else if (lowerText === '14') {
+            userState[senderID] = { item: 'Z-AURA FAMILY LAUNDRY PACK', step: 'awaiting_name' };
+            await sock.sendMessage(senderID, { text: "✅ **Z-AURA FAMILY LAUNDRY PACK**\n\nGenesis Vibrant Detergent 750ml\nSta-Soft Spring Fresh 2L\nSta-Soft Aromatherapy Passion 2L\nDr. Beckmann Colour Collector\nM Pre-Wash Stain Remover\nHome Butler Laundry Bag\n\nIli kuweka oda ya kifurushi hiki, tafadhali andika **jina lako kamili**:" });
+        }
+
+        // Vifurushi vya Baby (21)
+        else if (lowerText === '21') {
+            userState[senderID] = { item: 'Z-AURA BABY CLOTHES CARE PACK', step: 'awaiting_name' };
+            await sock.sendMessage(senderID, { text: "✅ **Z-AURA BABY CLOTHES CARE PACK**\n\nElizabeth Anne Baby Liquid Laundry Wash\nSta-Soft Ultra Concentrate Sensitive 1L\nDr. Beckmann Colour & Dirt Collector Sheets\nHome Butler Laundry Bag\n\nIli kuweka oda ya kifurushi hiki, tafadhali andika **jina lako kamili**:" });
+        }
+
+        // Vifurushi vya Home Cleaning (31 - 34)
+        else if (lowerText === '31') {
+            userState[senderID] = { item: 'Z-AURA KITCHEN POWER COMBO', step: 'awaiting_name' };
+            await sock.sendMessage(senderID, { text: "✅ **Z-AURA KITCHEN POWER COMBO**\n\nAstonish Air Fryer Cleaner Degreaser\nAstonish Kitchen Cleaner Zesty Lemon\nAstonish Specialist Grease Lift\nElbow Grease Soda Crystals\nElbow Grease Bicarbonate Soda\nElbow Grease Gloves\n\nIli kuweka oda ya kifurushi hiki, tafadhali andika **jina lako kamili**:" });
+        }
+        else if (lowerText === '32') {
+            userState[senderID] = { item: 'Z-AURA BATHROOM & TOILET POWER PACK (Hygiene Pack)', step: 'awaiting_name' };
+            await sock.sendMessage(senderID, { text: "✅ **Z-AURA BATHROOM & TOILET POWER PACK**\n\nAstonish White Jasmine & Basil Bathroom Cleaner\nAstonish Daily Shower Shine\nHarpic Original 750ml & Power Plus Original\nHarpic Lavender Toilet Cleaner\nDomestos Lavender Blast Thick Bleach & 50g Toilet Cleaner\nToilet Block 50g & Harpic Rimblock\nDuzzit Window Squeegee & Dish Brush Round\nElbow Grease Gloves (Large)\n\nIli kuweka oda ya kifurushi hiki, tafadhali andika **jina lako kamili**:" });
+        }
+        else if (lowerText === '33') {
+            userState[senderID] = { item: 'Z-AURA DEEP CLEAN HOME COMBO (All-In-One)', step: 'awaiting_name' };
+            await sock.sendMessage(senderID, { text: "✅ **Z-AURA DEEP CLEAN HOME COMBO**\n\nAstonish Multi-Surface Cleaner Orange Grove\nAstonish Specialist Antibacterial Surface Cleanser\nMr Muscle Floor & All-Purpose Cleaner\nMr Sheen Daily Surface 1L\nDomestos Thick Bleach Summer Fresh\nSuper Brite Floor & Tile Cleaner Lavender\nAstonish Multipurpose Cleaner Bleach\nMr Muscle Shower Shine Cleaner & Superbrite 500ml\nJeyes Homeguard Bleach Citrus\nM Thick Bleach Lavender Bloom\nCobra Multi Surface Cleaner Lavender\n\nIli kuweka oda ya kifurushi hiki, tafadhali andika **jina lako kamili**:" });
+        }
+        else if (lowerText === '34') {
+            userState[senderID] = { item: 'Z-AURA APPLIANCE CARE PACK (Protection-And-Shine)', step: 'awaiting_name' };
+            await sock.sendMessage(senderID, { text: "✅ **Z-AURA APPLIANCE CARE PACK**\n\nKwa ajili ya kutunza vifaa vyako vya nyumbani. Husaidia kuondoa scale na mabaki ya chokaa, kusafisha washing machine, na kung'arisha stainless steel kwa mwonekano safi na wa kuvutia.\n\nElbow Grease Kettle Descaler\nDuzzit Washing Machine Cleaner Lemon\nAstonish Stainless Steel Cleaner\n\nIli kuweka oda ya kifurushi hiki, tafadhali andika **jina lako kamili**:" });
+        }
+
+        // Vifurushi vya Air Fragrance (41 - 43)
+        else if (lowerText === '41') {
+            userState[senderID] = { item: 'Z-AURA HOME FRESH STARTER (Basic)', step: 'awaiting_name' };
+            await sock.sendMessage(senderID, { text: "✅ **Z-AURA HOME FRESH STARTER**\n\nAirwick\nMystify Lavender Gel Air Freshener\nMystify Citrus Fruit Gel Air Freshener\nShield Fresh 24 Lavender\n\nIli kuweka oda ya kifurushi hiki, tafadhali andika **jina lako kamili**:" });
+        }
+        else if (lowerText === '42') {
+            userState[senderID] = { item: 'Z-AURA PREMIUM HOME FRAGRANCE', step: 'awaiting_name' };
+            await sock.sendMessage(senderID, { text: "✅ **Z-AURA PREMIUM HOME FRAGRANCE**\n\nFebreze Air Freshener Peony & Cedar 185ml\nRS Fleur Home perfume\nRS Oud Forest\nRS Vanilla Bean\nFebreze Fabric Freshener Lenor Exotic Bloom\nFebreze Fabric Refresher Enchanted Wildflowers & Alpine Escape\nFebreze Fabric Plum Cherry\nMystify Gel Air Freshener & Shield Fresh 24 Tropical\nAirwick 250ml & Hanging Dehumidifier\n\nIli kuweka oda ya kifurushi hiki, tafadhali andika **jina lako kamili**:" });
+        }
+        else if (lowerText === '43') {
+            userState[senderID] = { item: 'Z-AURA BIN & SPACE FRESH PACK', step: 'awaiting_name' };
+            await sock.sendMessage(senderID, { text: "✅ **Z-AURA BIN & SPACE FRESH PACK**\n\nBin Brite Citronella Lemon\nBin Brite Mediterranean Sun\nBin Brite Berry Blast\nBin Brite Spring Blossom\nSmall Space Dehumidifier\n\nIli kuweka oda ya kifurushi hiki, tafadhali andika **jina lako kamili**:" });
+        }
+
+        // Vifurushi vya Car Care (51 - 53)
+        else if (lowerText === '51') {
+            userState[senderID] = { item: 'Z-AURA CAR FRESH STARTER (Basic)', step: 'awaiting_name' };
+            await sock.sendMessage(senderID, { text: "✅ **Z-AURA CAR FRESH STARTER**\n\nRS Fleur\nRS Vanilla Bean\nCar Fragrance Spicy Leather\nShield Fresh\n\nIli kuweka oda ya kifurushi hiki, tafadhali andika **jina lako kamili**:" });
+        }
+        else if (lowerText === '52') {
+            userState[senderID] = { item: 'Z-AURA CAR INTERIOR CARE', step: 'awaiting_name' };
+            await sock.sendMessage(senderID, { text: "✅ **Z-AURA CAR INTERIOR CARE**\n\nShield Cockpit Dashboard Protector\nShield Leather Care 400ml\nShield Sheen Silicone\nShield Splash N Dash Sponge\n\nIli kuweka oda ya kifurushi hiki, tafadhali andika **jina lako kamili**:" });
+        }
+        else if (lowerText === '53') {
+            userState[senderID] = { item: 'Z-AURA PREMIUM CAR CLEAN AND FRESH', step: 'awaiting_name' };
+            await sock.sendMessage(senderID, { text: "✅ **Z-AURA PREMIUM CAR CLEAN AND FRESH**\n\nOptimo Auto Washing Liquid\nShield Cockpit Dashboard Protector & Leather Care\nShield Sheen Silicone & Splash N Dash Sponge\nRS Leather Secret & Car Fragrance Spicy Leather\nRS Fleur, Oud Forest & Vanilla Bean\n\nIli kuweka oda ya kifurushi hiki, tafadhali andika **jina lako kamili**:" });
+        }
+        else {
+            await sock.sendMessage(senderID, { text: "Samahani, tuma namba **0** au neno **menu** kuona orodha kuu." });
+        }
+    });
 }
 
-async function shutdown(signal) {
-  console.log(`\n${signal} imepokelewa. Inazima mfumo...`);
-
-  shuttingDown = true;
-
-  if (reconnectTimer) {
-    clearTimeout(reconnectTimer);
-    reconnectTimer = null;
-  }
-
-  try {
-    if (botSocket) {
-      botSocket.end(undefined);
-      botSocket = null;
-    }
-
-    await mongoose.disconnect();
-  } catch (error) {
-    console.error(
-      'Hitilafu wakati wa kuzima:',
-      error.message,
-    );
-  }
-
-  server.close((error) => {
-    if (error) {
-      console.error('Hitilafu ya kufunga seva:', error.message);
-      process.exitCode = 1;
-    }
-
-    process.exit();
-  });
-
-  setTimeout(() => {
-    console.error('Muda wa kuzima mfumo umeisha.');
-    process.exit(1);
-  }, 5000).unref();
-}
-
-async function main() {
-  if (!MONGODB_URI) {
-    throw new Error(
-      'Weka MONGODB_URI kwenye faili la .env kabla ya kuanzisha bot.',
-    );
-  }
-
-  if (!QR_TOKEN || QR_TOKEN.length < 20) {
-    throw new Error(
-      'Weka QR_TOKEN yenye angalau herufi 20 kwenye faili la .env.',
-    );
-  }
-
-  await mongoose.connect(MONGODB_URI);
-  console.log('MongoDB imeunganishwa.');
-
-  server.listen(PORT, '0.0.0.0', () => {
-    console.log(`Seva inasikiliza kwenye port ${PORT}.`);
-  });
-
-  await startBot();
-}
-
-process.on('SIGINT', () => shutdown('SIGINT'));
-process.on('SIGTERM', () => shutdown('SIGTERM'));
-
-main().catch((error) => {
-  console.error('Mfumo haujaanza:', error.message);
-  process.exitCode = 1;
-});
-
+startBot();
